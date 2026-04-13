@@ -1,0 +1,121 @@
+================================================================================
+  SimpleCore CPU -- Architecture Schematic
+================================================================================
+
+                          +-------------------------------+
+                          |           CPU DIE             |
+                          |                               |
+                          |  +----------+  +-----------+  |
+                          |  | REGISTER |  |    ALU    |  |
+                          |  |   FILE   |<->|           |  |
+                          |  |  R0..R7  |  | ADD  SUB  |  |
+                          |  |  PC  SP  |  | MUL  DIV  |  |
+                          |  | FLAGS    |  | AND  OR   |  |
+                          |  +----+-----+  | XOR  NOT  |  |
+                          |       |        | SHL  SHR  |  |
+                          |       |        +-----+-----+  |
+                          |       |              |        |
+                          |  +----+--------------+-----+  |
+                          |  |      CONTROL UNIT        |  |
+                          |  |  Instruction Register    |  |
+                          |  |  Fetch / Decode / Exec   |  |
+                          |  |  State Machine           |  |
+                          |  +------------+-------------+  |
+                          |               |               |
+                          +---------------+---------------+
+                                          |
+                              16-bit ADDRESS + DATA BUS
+                                          |
+               +--------------------------+---------------------------+
+               |                          |                           |
+     +---------+----------+    +----------+---------+    +-----------+---------+
+     |     ROM / RAM       |    |   Memory-Mapped    |    |    STACK REGION     |
+     |                     |    |       I/O          |    |                     |
+     | 0x0000-0x00FF       |    |  0xFF00  Console   |    |  0xFF10 - 0xFFFF   |
+     | Vectors/Reset       |    |          OUT/IN    |    |  SP starts 0xFFFF  |
+     |                     |    |  0xFF02  Timer LO  |    |  grows downward    |
+     | 0x0100-0x7FFF       |    |  0xFF03  Timer HI  |    +--------------------+
+     | ROM (Program)       |    |  0xFF04  Timer CTL |
+     |                     |    +--------------------+
+     | 0x8000-0xEFFF       |             |
+     | RAM (Data)          |    +--------+---------+
+     +---------------------+    |   DEVICES        |
+                                |  +-----------+   |
+                                |  |  Console  |   |
+                                |  | (stdout/  |   |
+                                |  |  stdin)   |   |
+                                |  +-----------+   |
+                                |  +-----------+   |
+                                |  |  Timer    |   |
+                                |  | (32-bit   |   |
+                                |  |  counter) |   |
+                                |  +-----------+   |
+                                +------------------+
+
+================================================================================
+  Instruction Word Format (16-bit)
+================================================================================
+
+  Bit  15  14  13  12  11  10   9   8   7   6   5   4   3   2   1   0
+       +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+       |      OPCODE  (6 bits)     | MD(2) |  DST(3)   |   SRC (5)     |
+       +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+
+  OPCODE [15:10]  -- 6-bit operation code (up to 64 instructions)
+  MD     [ 9: 8]  -- Addressing Mode: 00=REG  01=IMM  10=MEM  11=IND
+  DST    [ 7: 5]  -- Destination register index (0-7)
+  SRC    [ 4: 0]  -- Source register index (0-7) or shift amount
+
+  Two-word instructions: for MODE_IMM and MODE_MEM the second word
+  immediately following in memory holds the 16-bit operand value.
+
+================================================================================
+  Pipeline (Fetch / Decode / Execute)
+================================================================================
+
+    Cycle                Action
+    -----------------------------------------------------------------
+    FETCH     1. Word <- mem[PC];  PC <- PC + 1
+              2. If IMM/MEM mode: extra <- mem[PC];  PC <- PC + 1
+
+    DECODE    3. Opcode <- word[15:10]
+              4. Mode   <- word[9:8]
+              5. Dst    <- word[7:5]
+              6. Src    <- word[4:0]
+              7. Resolve effective operand value from Mode
+
+    EXECUTE   8. Perform operation (ALU, mem read/write, branch)
+              9. Write result to destination (register or memory)
+             10. Update FLAGS (Z N C V)
+             11. Tick I/O subsystem (advances timer counter)
+
+================================================================================
+  Memory Map
+================================================================================
+
+    Address Range    Size    Description
+    -----------------------------------------------------------
+    0x0000-0x00FF    256 W   Interrupt / reset vectors
+    0x0100-0x7FFF   ~32 K    ROM -- program code loaded here
+    0x8000-0xEFFF   ~28 K    RAM -- heap, globals, output data
+    0xF000-0xFEFF    ~4 K    Reserved
+    0xFF00-0xFF0F    16 W    Memory-Mapped I/O
+      0xFF00                   Console OUT (write char)
+      0xFF01                   Console IN  (read char)
+      0xFF02                   Timer counter LOW  word
+      0xFF03                   Timer counter HIGH word
+      0xFF04                   Timer control (bit0=run, bit1=reset)
+    0xFF10-0xFFFF   240 W    Stack (grows downward from 0xFFFF)
+
+================================================================================
+  FLAGS Register
+================================================================================
+
+    Bit   Flag   Set when
+    ----------------------------------------------------------
+     0    Z      Result of last ALU operation == 0
+     1    N      Bit 15 of result is 1 (negative in two's complement)
+     2    C      Unsigned carry (ADD) or borrow (SUB/CMP)
+     3    V      Signed two's-complement overflow (ADD, SUB)
+
+================================================================================

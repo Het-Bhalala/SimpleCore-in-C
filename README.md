@@ -32,6 +32,10 @@ See `docs/schematic.txt` for the full ASCII schematic.
 simplecore/
 ├── CMakeLists.txt
 ├── README.md
+├── simplecore.exe              Pre-built Windows executable
+├── CPU_design_factorial        Project report (function calls & recursion)
+├── simple_core_demo.mp4        Demo video — full CPU walkthrough
+├── factorial_demo.mp4          Demo video — recursive factorial
 ├── docs/
 │   └── schematic.txt         CPU architecture diagram
 ├── include/
@@ -53,7 +57,8 @@ simplecore/
 └── programs/
     ├── timer.asm             Timer Fetch/Compute/Store demonstration
     ├── hello.asm             Hello, World
-    └── fibonacci.asm         Fibonacci sequence (with decimal printing)
+    ├── fibonacci.asm         Fibonacci sequence (with decimal printing)
+    └── factorial.asm         Recursive factorial — N! for N = 0..10
 ```
 
 ---
@@ -111,6 +116,92 @@ gcc -std=c99 -Wall -Iinclude src/*.c -o simplecore
 ./simplecore --step programs/hello.asm
 # Press Enter to step one instruction, 'q' to quit
 ```
+
+---
+
+## Recursive Factorial Program
+
+`programs/factorial.asm` computes N! recursively for N = 0 through 10 and stores every result in RAM starting at address `0x8000`.
+
+### Memory layout
+
+| Region | Address | Description |
+|--------|---------|-------------|
+| `main` | `0x0100` | Entry point — loop N=0..10, store results |
+| `factorial` | `0x0120` | Recursive subroutine — input R0=N, output R0=N! |
+| `multiply` | `0x0140` | Helper — repeated addition, R0=A×B |
+| Results | `0x8000–0x800A` | RAM: `mem[0x8000+N] = N!` |
+
+### How recursion works
+
+```asm
+factorial:
+    MOV  R1, #1
+    CMP  R0, R1
+    JGT  fact_recurse       ; N > 1 → recurse
+
+    MOV  R0, #1             ; base case: return 1
+    RET
+
+fact_recurse:
+    PUSH R2                 ; save registers
+    PUSH R3
+    PUSH R0                 ; save N on stack
+
+    DEC  R0
+    CALL factorial          ; recursive call: factorial(N-1) → R0
+
+    MOV  R1, R0             ; R1 = factorial(N-1)
+    POP  R0                 ; restore N
+    POP  R3
+    POP  R2
+
+    CALL multiply           ; R0 = N * factorial(N-1)
+    RET
+```
+
+### Stack frame per recursive call
+
+```
+[SP+0]  return address     ← pushed automatically by CALL
+[SP-1]  saved R2           ← PUSH R2
+[SP-2]  saved R3           ← PUSH R3
+[SP-3]  saved N            ← PUSH R0
+```
+
+### Running the factorial demo
+
+```bash
+# Basic run
+simplecore.exe --run programs\factorial.asm --regs
+
+# See all results stored in RAM
+simplecore.exe --run programs\factorial.asm --dump --dump-addr 8000 --dump-len 11 --regs
+
+# Watch the recursion live — every instruction
+simplecore.exe --run programs\factorial.asm --trace --max-cycles 80
+
+# Step through one instruction at a time
+simplecore.exe --step programs\factorial.asm
+```
+
+### Expected RAM output
+
+| Address | Hex  | Decimal | Value |
+|---------|------|---------|-------|
+| 0x8000  | 0001 | 1       | 0! = 1 |
+| 0x8001  | 0001 | 1       | 1! = 1 |
+| 0x8002  | 0002 | 2       | 2! = 2 |
+| 0x8003  | 0006 | 6       | 3! = 6 |
+| 0x8004  | 0018 | 24      | 4! = 24 |
+| 0x8005  | 0078 | 120     | 5! = 120 |
+| 0x8006  | 02D0 | 720     | 6! = 720 |
+| 0x8007  | 13B0 | 5040    | 7! = 5040 |
+| 0x8008  | 9D80 | 40320   | 8! = 40320 |
+| 0x8009  | 8980 | 35200   | 9! = 362880 (16-bit wrap) |
+| 0x800A  | 5F00 | 24320   | 10! = 3628800 (16-bit wrap) |
+
+> Values from 9! onwards exceed the 16-bit maximum of 65535 and wrap around — this is correct behaviour for 16-bit hardware.
 
 ---
 
